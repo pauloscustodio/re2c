@@ -1,0 +1,98 @@
+#!/usr/bin/env perl
+
+# Port run_tests.sh to Perl to be platform independent
+
+# Args: test dir
+use strict;
+use warnings;
+use File::Find;
+use File::Basename;
+use File::Copy;
+
+@ARGV > 0 && -x $ARGV[0] or die "Usage: $0 re2c [TESTS]";
+my $re2c = shift;
+my @re_files = @ARGV;
+unless (@re_files) {
+	find(sub { push @re_files, $File::Find::name if -f $_ && /\.re$/ }, '@PROJECT_SOURCE_DIR@/test' );
+}
+
+my $errcnt = 0; my $test_nr;
+for my $x (sort @re_files) {
+	$test_nr++;
+
+	my $c = dirname($x)."/".basename($x, ".re").".c";
+	my $bmk = slurp($c);
+
+	# remove prefix
+	my $base = basename($x, ".re");
+	my $outx = $base.".re";
+	my $outc = $base.".c";
+	unlink($outc, "$outc.orig");
+	
+	# get switches
+	my $switches = basename($x);
+	for ($switches) {
+		s/^[^.]*\.re$//g;
+		s/^[^.]*\.(.*)\.re$/$1/g;
+		s/^([^-])/-$1/;
+		s/--([^ (-]*)/ --$1/g;
+		s/\(([^)]*)\)/ $1/g;
+	}
+	$switches .= qq( -o "$outc" --no-version --no-generation-date -W);
+
+	# create sandbox
+	my $tmpdir = "tmp$test_nr";
+	if (-d $tmpdir) { unlink <$tmpdir/*>; rmdir $tmpdir; }
+	mkdir $tmpdir or die "mkdir $tmpdir: $!\n";
+	copy($x, "$tmpdir/$outx");
+	chdir $tmpdir or die "chdir $tmpdir: $!\n";
+
+		# run re2c
+		system(qq($re2c $switches "$outx" 2>"$outc.stderr" 1>&2));
+	
+		# paste all files dropped by re2c into output file
+		unlink $outx;
+		my $out = "";
+		opendir(my $dh, ".");
+		for (sort readdir($dh)) {
+			next unless -f $_;
+			$out .= slurp($_);
+			unlink $_;
+		}
+
+	chdir "..";
+	rmdir $tmpdir;
+
+	if ($out eq "") {
+		print "MISSING\t$outc\n";
+		$errcnt++;
+	}
+	elsif ($out ne $bmk) {
+		print "FAIL\t$c $outc\n";
+		spew($outc, $out);
+		system "diff -w $c $outc";
+		$errcnt++;
+	}
+	else {
+		print "OK\t$outc\n";
+	}
+}
+
+print int(100*($test_nr-$errcnt)/$test_nr), "% tests passed, $errcnt failed out of $test_nr\n";
+exit $errcnt ? 1 : 0;
+
+
+sub slurp {
+	my($file) = @_;
+	local $/;
+	open my $fh, $file or die "$file: $!\n";
+	my $ret = <$fh>;
+	$ret =~ s/\r//g;
+	return $ret;
+}
+
+sub spew {
+	my($file, $text) = @_;
+	open my $fh, ">", $file or die "$file: $!\n";
+	print $fh $text;
+}
