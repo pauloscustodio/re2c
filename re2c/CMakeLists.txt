@@ -39,6 +39,7 @@ add_executable(re2c
 
 # tests
 enable_testing()
+if(NOT RE2C_DISABLE_TESTS)
 add_executable( range_test
 	src/test/range/test.cc
 	src/util/range.cc
@@ -59,3 +60,5 @@ add_test(
 	NAME 	CMakeRunTests 
 	COMMAND	perl CMakeRunTests.pl $<TARGET_FILE:re2c>
 )
+endif(NOT RE2C_DISABLE_TESTS)
+
